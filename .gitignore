@@ -1,0 +1,27 @@
+# Python and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+
+# Tool caches and local settings
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+.DS_Store
+
+# Local secrets and runtime logs
+.env
+.env.*
+!.env.example
+logs/
+*.log
+
+# Ignore runtime data while keeping the directory in Git
+/data/*
+!/data/.gitkeep
