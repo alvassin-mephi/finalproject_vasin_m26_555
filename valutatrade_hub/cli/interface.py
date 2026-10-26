@@ -6,7 +6,7 @@ import shlex
 from prettytable import PrettyTable
 
 from valutatrade_hub.core.models import User
-from valutatrade_hub.core.usecases import login, register, show_portfolio
+from valutatrade_hub.core.usecases import buy, login, register, sell, show_portfolio
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -26,6 +26,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "show-portfolio", help="Показать портфель", allow_abbrev=False
     )
     portfolio_command.add_argument("--base", default="USD", help="Базовая валюта")
+
+    for name, description in (
+        ("buy", "Купить валюту за USD"),
+        ("sell", "Продать валюту за USD"),
+    ):
+        command = commands.add_parser(name, help=description, allow_abbrev=False)
+        command.add_argument("--currency", required=True, help="Код валюты")
+        command.add_argument(
+            "--amount", required=True, type=float, help="Количество единиц валюты"
+        )
 
     commands.add_parser("help", help="Показать список команд")
     commands.add_parser("exit", help="Завершить работу")
@@ -61,6 +71,28 @@ def _print_portfolio(report: dict) -> None:
     print(f"Портфель пользователя '{report['username']}' (база: {base}):")
     print(table)
     print(f"ИТОГО: {_format_amount(report['total_value'], base)} {base}")
+
+
+def _print_trade(report: dict) -> None:
+    """Display the exchanged amount and the changes in both wallets"""
+    code = report["currency"]
+    operation = "Продажа" if report["operation"] == "sell" else "Покупка"
+    value_label = "Выручка" if report["operation"] == "sell" else "Стоимость покупки"
+
+    print(
+        f"{operation} выполнена: {_format_amount(report['amount'], code)} {code} "
+        f"по курсу {report['rate']:,.8f} USD/{code}"
+    )
+    print("Изменения в портфеле:")
+    print(
+        f"- {code}: было {_format_amount(report['before'], code)} "
+        f"→ стало {_format_amount(report['after'], code)}"
+    )
+    print(
+        f"- USD: было {_format_amount(report['usd_before'], 'USD')} "
+        f"→ стало {_format_amount(report['usd_after'], 'USD')}"
+    )
+    print(f"{value_label}: {_format_amount(report['value_usd'], 'USD')} USD")
 
 
 def main() -> None:
@@ -111,6 +143,24 @@ def main() -> None:
                 report = show_portfolio(current_user, command.base)
 
                 _print_portfolio(report)
+
+            elif command.command == "buy":
+                report = buy(
+                    user_id=current_user.user_id if current_user is not None else None,
+                    currency_code=command.currency,
+                    amount=command.amount,
+                )
+
+                _print_trade(report)
+
+            elif command.command == "sell":
+                report = sell(
+                    user_id=current_user.user_id if current_user is not None else None,
+                    currency_code=command.currency,
+                    amount=command.amount,
+                )
+
+                _print_trade(report)
 
             elif command.command == "help":
                 parser.print_help()

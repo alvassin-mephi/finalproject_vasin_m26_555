@@ -3,14 +3,18 @@
 from datetime import datetime
 from pathlib import Path
 
+from valutatrade_hub.core.exceptions import InsufficientFundsError
 from valutatrade_hub.core.models import Portfolio, User, Wallet
 from valutatrade_hub.core.utils import (
     EXCHANGE_RATES,
     SUPPORTED_CURRENCIES,
     load_records,
     save_records,
+    validate_amount,
     validate_currency_code,
+    validate_number,
 )
+from valutatrade_hub.infra import settings
 
 USERS_FILE = Path("data/users.json")
 PORTFOLIOS_FILE = Path("data/portfolios.json")
@@ -33,7 +37,7 @@ def _restore_user(record: dict) -> User:
 
 
 def register(username: str, password: str) -> User:
-    """Create a user and persist an empty portfolio without starting a session"""
+    """Create a user with the configured USD balance without starting a session"""
     records = load_records(USERS_FILE)
     users = [_restore_user(record) for record in records]
 
@@ -52,7 +56,12 @@ def register(username: str, password: str) -> User:
         "salt": user.salt,
         "registration_date": user.registration_date.isoformat(),
     }
-    portfolio_record = {"user_id": user.user_id, "wallets": {}}
+
+    usd_wallet = Wallet(currency_code="USD", balance=settings.INITIAL_USD_BALANCE)
+    portfolio_record = {
+        "user_id": user.user_id,
+        "wallets": {"USD": {"balance": usd_wallet.balance}},
+    }
 
     save_records(USERS_FILE, records + [user_record])
 
@@ -137,4 +146,102 @@ def show_portfolio(user: User | None, base_currency: str = "USD") -> dict:
         "base_currency": base,
         "wallets": rows,
         "total_value": total_value,
+    }
+
+
+def _save_portfolio(portfolio: Portfolio) -> None:
+    """Save all wallets together while preserving the other users' portfolios"""
+    records = load_records(PORTFOLIOS_FILE)
+
+    for record in records:
+        if record.get("user_id") == portfolio.user_id:
+            record["wallets"] = {
+                code: {"balance": wallet.balance}
+                for code, wallet in portfolio.wallets.items()
+            }
+            save_records(PORTFOLIOS_FILE, records)
+
+            return
+
+    raise ValueError(f"Портфель пользователя с ID {portfolio.user_id} не найден")
+
+
+def buy(user_id: int | None, currency_code: str, amount: float) -> dict:
+    """Buy currency using the user's USD balance"""
+    return _trade(user_id, currency_code, amount, is_sale=False)
+
+
+def sell(user_id: int | None, currency_code: str, amount: float) -> dict:
+    """Sell currency and credit the proceeds to the user's USD wallet"""
+    return _trade(user_id, currency_code, amount, is_sale=True)
+
+
+def _trade(
+    user_id: int | None, currency_code: str, amount: float, *, is_sale: bool
+) -> dict:
+    """Exchange currency and USD, persisting both balances after all checks pass"""
+    if user_id is None:
+        raise ValueError("Сначала выполните login")
+
+    if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+        raise ValueError("ID пользователя должен быть положительным целым числом")
+
+    code = validate_currency_code(currency_code)
+
+    if code not in SUPPORTED_CURRENCIES:
+        raise ValueError(f"Неизвестная валюта '{code}'")
+
+    if code == "USD":
+        raise ValueError("USD используется для расчетов: выберите другую валюту")
+
+    amount = validate_amount(amount)
+    portfolio = _load_portfolio(user_id)
+
+    # Check available funds before requesting the exchange rate
+    if is_sale:
+        if code not in portfolio.wallets:
+            raise InsufficientFundsError(available=0.0, required=amount, code=code)
+
+        wallet = portfolio.get_wallet(code)
+
+        if amount > wallet.balance:
+            raise InsufficientFundsError(
+                available=wallet.balance, required=amount, code=code
+            )
+    else:
+        wallet = portfolio.add_currency(code)
+
+    if code not in EXCHANGE_RATES:
+        raise ValueError(f"Не удалось получить курс для {code}→USD")
+
+    rate = validate_number(EXCHANGE_RATES[code])
+
+    if rate <= 0:
+        raise ValueError(f"Курс для {code}→USD должен быть положительным")
+
+    value_usd = validate_amount(amount * rate)
+
+    usd_wallet = portfolio.add_currency("USD")
+    before = wallet.balance
+    usd_before = usd_wallet.balance
+
+    if is_sale:
+        wallet.withdraw(amount)
+        usd_wallet.deposit(value_usd)
+    else:
+        usd_wallet.withdraw(value_usd)
+        wallet.deposit(amount)
+
+    _save_portfolio(portfolio)
+
+    return {
+        "operation": "sell" if is_sale else "buy",
+        "currency": code,
+        "amount": amount,
+        "rate": rate,
+        "value_usd": value_usd,
+        "before": before,
+        "after": wallet.balance,
+        "usd_before": usd_before,
+        "usd_after": usd_wallet.balance,
     }
