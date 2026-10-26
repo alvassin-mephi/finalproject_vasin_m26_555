@@ -3,8 +3,10 @@
 import argparse
 import shlex
 
+from prettytable import PrettyTable
+
 from valutatrade_hub.core.models import User
-from valutatrade_hub.core.usecases import login, register
+from valutatrade_hub.core.usecases import login, register, show_portfolio
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -20,10 +22,45 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("--username", required=True)
         command.add_argument("--password", required=True)
 
+    portfolio_command = commands.add_parser(
+        "show-portfolio", help="Показать портфель", allow_abbrev=False
+    )
+    portfolio_command.add_argument("--base", default="USD", help="Базовая валюта")
+
     commands.add_parser("help", help="Показать список команд")
     commands.add_parser("exit", help="Завершить работу")
 
     return parser
+
+
+def _format_amount(amount: float, currency_code: str) -> str:
+    """Keep eight decimal places for crypto amounts and two for fiat amounts"""
+    precision = 8 if currency_code in ("BTC", "ETH") else 2
+
+    return f"{amount:,.{precision}f}"
+
+
+def _print_portfolio(report: dict) -> None:
+    """Display a portfolio report without performing financial calculations"""
+    if not report["wallets"]:
+        print(f"Портфель пользователя '{report['username']}' пуст.")
+
+        return
+
+    base = report["base_currency"]
+    table = PrettyTable(["Валюта", "Баланс", f"Стоимость ({base})"])
+    table.align["Валюта"] = "l"
+    table.align["Баланс"] = "r"
+    table.align[f"Стоимость ({base})"] = "r"
+
+    for code, balance, value in report["wallets"]:
+        table.add_row(
+            [code, _format_amount(balance, code), _format_amount(value, base)]
+        )
+
+    print(f"Портфель пользователя '{report['username']}' (база: {base}):")
+    print(table)
+    print(f"ИТОГО: {_format_amount(report['total_value'], base)} {base}")
 
 
 def main() -> None:
@@ -69,6 +106,11 @@ def main() -> None:
                 current_user = login(command.username, command.password)
 
                 print(f"Вы вошли как '{current_user.username}'")
+
+            elif command.command == "show-portfolio":
+                report = show_portfolio(current_user, command.base)
+
+                _print_portfolio(report)
 
             elif command.command == "help":
                 parser.print_help()

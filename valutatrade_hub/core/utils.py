@@ -5,6 +5,9 @@ import math
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+# Supported codes are independent of the available exchange-rate quotes
+SUPPORTED_CURRENCIES = ("USD", "EUR", "RUB", "BTC", "ETH")
+
 # Example USD prices per currency unit from the assignment, not live rates
 EXCHANGE_RATES = {
     "USD": 1.0,
