@@ -19,6 +19,16 @@ build-backend = "uv_build"
 module-name = "valutatrade_hub"
 module-root = ""
 
+[tool.valutatrade]
+USERS_FILE = "data/users.json"
+PORTFOLIOS_FILE = "data/portfolios.json"
+RATES_FILE = "data/rates.json"
+INITIAL_USD_BALANCE = 10_000.0
+RATES_TTL_SECONDS = 300
+DEFAULT_BASE_CURRENCY = "USD"
+LOG_FILE = "logs/actions.log"
+LOG_FORMAT = "%(levelname)s %(asctime)s %(message)s"
+
 [tool.ruff]
 line-length = 88
 target-version = "py312"

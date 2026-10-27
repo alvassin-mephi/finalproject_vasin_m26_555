@@ -38,7 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
     portfolio_command = commands.add_parser(
         "show-portfolio", help="Показать портфель", allow_abbrev=False
     )
-    portfolio_command.add_argument("--base", default="USD", help="Базовая валюта")
+    portfolio_command.add_argument("--base", help="Базовая валюта")
 
     for name, description in (
         ("buy", "Купить валюту за USD"),

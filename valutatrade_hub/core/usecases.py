@@ -1,89 +1,48 @@
 """Application operations for managing users and currency portfolios"""
 
 from datetime import UTC, datetime
-from pathlib import Path
 
 from valutatrade_hub.core.currencies import CURRENCIES, get_currency
 from valutatrade_hub.core.exceptions import (
     ApiRequestError,
-    CurrencyNotFoundError,
     InsufficientFundsError,
 )
 from valutatrade_hub.core.models import Portfolio, User, Wallet
 from valutatrade_hub.core.utils import (
     EXCHANGE_RATES,
-    load_json,
-    load_records,
-    save_json,
     validate_amount,
     validate_number,
 )
-from valutatrade_hub.infra import settings
+from valutatrade_hub.infra.database import DatabaseManager
+from valutatrade_hub.infra.settings import SettingsLoader
 
-USERS_FILE = Path("data/users.json")
-PORTFOLIOS_FILE = Path("data/portfolios.json")
-RATES_FILE = Path("data/rates.json")
-
-
-def _restore_user(record: dict) -> User:
-    """Restore a user without generating a new salt or password hash"""
-    try:
-        return User(
-            user_id=record["user_id"],
-            username=record["username"],
-            hashed_password=record["hashed_password"],
-            salt=record["salt"],
-            registration_date=datetime.fromisoformat(record["registration_date"]),
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError(
-            f"Некорректные данные пользователя в файле '{USERS_FILE}'"
-        ) from error
+# All use cases share the same configuration and storage manager
+settings = SettingsLoader()
+database = DatabaseManager()
 
 
 def register(username: str, password: str) -> User:
     """Create a user with the configured USD balance without starting a session"""
-    records = load_records(USERS_FILE)
-    users = [_restore_user(record) for record in records]
+    users = database.get_users()
 
     if any(user.username == username for user in users):
         raise ValueError(f"Имя пользователя '{username}' уже занято")
 
     user_id = max((user.user_id for user in users), default=0) + 1
     user = User.create(user_id, username, password)
+    usd_wallet = Wallet(
+        currency_code="USD", balance=settings.get("INITIAL_USD_BALANCE")
+    )
+    portfolio = Portfolio(user_id=user.user_id, wallets={"USD": usd_wallet}, user=user)
 
-    portfolios = load_records(PORTFOLIOS_FILE)
-
-    user_record = {
-        "user_id": user.user_id,
-        "username": user.username,
-        "hashed_password": user.hashed_password,
-        "salt": user.salt,
-        "registration_date": user.registration_date.isoformat(),
-    }
-
-    usd_wallet = Wallet(currency_code="USD", balance=settings.INITIAL_USD_BALANCE)
-    portfolio_record = {
-        "user_id": user.user_id,
-        "wallets": {"USD": {"balance": usd_wallet.balance}},
-    }
-
-    save_json(USERS_FILE, records + [user_record])
-
-    try:
-        save_json(PORTFOLIOS_FILE, portfolios + [portfolio_record])
-    except (OSError, TypeError, ValueError):
-        save_json(USERS_FILE, records)
-
-        raise
+    database.create_user(user=user, portfolio=portfolio)
 
     return user
 
 
 def login(username: str, password: str) -> User:
     """Authenticate an existing user for the caller's current session"""
-    users = [_restore_user(record) for record in load_records(USERS_FILE)]
-    user = next((user for user in users if user.username == username), None)
+    user = database.get_user(username)
 
     if user is None:
         raise ValueError(f"Пользователь '{username}' не найден")
@@ -96,39 +55,21 @@ def login(username: str, password: str) -> User:
 
 def _load_portfolio(user_id: int, *, user: User | None = None) -> Portfolio:
     """Load a portfolio by owner ID, retaining the supplied user when available"""
-    records = load_records(PORTFOLIOS_FILE)
-    record = next(
-        (record for record in records if record.get("user_id") == user_id), None
-    )
+    portfolio = database.get_portfolio(user_id, user=user)
 
-    if record is None:
+    if portfolio is None:
         raise ValueError(f"Портфель пользователя с ID {user_id} не найден")
 
-    try:
-        stored_wallets = record["wallets"]
-
-        if not isinstance(stored_wallets, dict):
-            raise TypeError("Кошельки должны быть переданы словарем")
-
-        wallets = {
-            code: Wallet(currency_code=code, balance=wallet["balance"])
-            for code, wallet in stored_wallets.items()
-        }
-
-        return Portfolio(user_id=record["user_id"], wallets=wallets, user=user)
-    except CurrencyNotFoundError:
-        # Preserve CurrencyNotFoundError before handling other ValueError exceptions
-        raise
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError(
-            f"Некорректные данные портфеля в файле '{PORTFOLIOS_FILE}'"
-        ) from error
+    return portfolio
 
 
-def show_portfolio(user: User | None, base_currency: str = "USD") -> dict:
+def show_portfolio(user: User | None, base_currency: str | None = None) -> dict:
     """Load a portfolio and prepare its values for display in the base currency"""
     if user is None:
         raise ValueError("Сначала выполните login")
+
+    if base_currency is None:
+        base_currency = settings.get("DEFAULT_BASE_CURRENCY")
 
     base = get_currency(base_currency).code
     portfolio = _load_portfolio(user.user_id, user=user)
@@ -156,23 +97,6 @@ def show_portfolio(user: User | None, base_currency: str = "USD") -> dict:
         "wallets": rows,
         "total_value": total_value,
     }
-
-
-def _save_portfolio(portfolio: Portfolio) -> None:
-    """Save all wallets together while preserving the other users' portfolios"""
-    records = load_records(PORTFOLIOS_FILE)
-
-    for record in records:
-        if record.get("user_id") == portfolio.user_id:
-            record["wallets"] = {
-                code: {"balance": wallet.balance}
-                for code, wallet in portfolio.wallets.items()
-            }
-            save_json(PORTFOLIOS_FILE, records)
-
-            return
-
-    raise ValueError(f"Портфель пользователя с ID {portfolio.user_id} не найден")
 
 
 def buy(user_id: int | None, currency_code: str, amount: float) -> dict:
@@ -231,7 +155,7 @@ def _trade(
         usd_wallet.withdraw(value_usd)
         wallet.deposit(amount)
 
-    _save_portfolio(portfolio)
+    database.save_portfolio(portfolio)
 
     return {
         "operation": "sell" if is_sale else "buy",
@@ -286,7 +210,7 @@ def _get_cached_rate(
             updated_at = updated_at.astimezone(UTC)
             age = (now - updated_at).total_seconds()
 
-            if rate <= 0 or not 0 <= age < settings.RATES_TTL_SECONDS:
+            if rate <= 0 or not 0 <= age < settings.get("RATES_TTL_SECONDS"):
                 return None
 
             usd_rates[code] = rate
@@ -343,10 +267,7 @@ def get_rate(from_currency: str, to_currency: str) -> dict:
             "updated_at": now.isoformat(timespec="seconds"),
         }
 
-    cache = load_json(RATES_FILE, default={})
-
-    if not isinstance(cache, dict):
-        raise ValueError(f"Файл '{RATES_FILE}' должен содержать объект с курсами")
+    cache = database.get_rates()
 
     result = _get_cached_rate(cache, from_currency, to_currency, now)
 
@@ -363,6 +284,6 @@ def get_rate(from_currency: str, to_currency: str) -> dict:
         if result is None:
             raise ApiRequestError(reason=unavailable)
 
-        save_json(RATES_FILE, cache)
+        database.save_rates(cache)
 
     return {"from_currency": from_currency, "to_currency": to_currency, **result}

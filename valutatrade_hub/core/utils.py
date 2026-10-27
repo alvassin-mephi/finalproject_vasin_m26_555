@@ -1,9 +1,6 @@
-"""Validation, JSON storage, and fixed example exchange rates"""
+"""Validation and fixed example exchange rates"""
 
-import json
 import math
-from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 # Example USD prices per currency unit from the assignment, not live rates
 EXCHANGE_RATES = {
@@ -52,50 +49,3 @@ def validate_amount(amount: float) -> float:
         raise ValueError("'amount' должен быть положительным числом")
 
     return amount
-
-
-def load_json(file_path: Path, *, default: list | dict) -> object:
-    """Read JSON data, returning the supplied default only when the file is absent"""
-    try:
-        with file_path.open(encoding="utf-8") as source:
-            return json.load(source)
-    except FileNotFoundError:
-        return default
-    except json.JSONDecodeError as error:
-        raise ValueError(f"Некорректный JSON в файле '{file_path}'") from error
-
-
-def load_records(file_path: Path) -> list[dict]:
-    """Read JSON records, treating a missing file as an empty collection"""
-    records = load_json(file_path, default=[])
-
-    if not isinstance(records, list) or any(
-        not isinstance(record, dict) for record in records
-    ):
-        raise ValueError(f"Файл '{file_path}' должен содержать список объектов")
-
-    return records
-
-
-def save_json(file_path: Path, data: list | dict) -> None:
-    """Write JSON data through a temporary file to avoid partial writes"""
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
-
-    try:
-        with NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=file_path.parent,
-            prefix=f".{file_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as target:
-            temporary_path = Path(target.name)
-            json.dump(data, target, ensure_ascii=False, indent=2, allow_nan=False)
-            target.write("\n")
-
-        temporary_path.replace(file_path)
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
