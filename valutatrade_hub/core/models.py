@@ -7,11 +7,11 @@ import secrets
 import string
 from datetime import UTC, datetime
 
+from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import InsufficientFundsError
 from valutatrade_hub.core.utils import (
     EXCHANGE_RATES,
     validate_amount,
-    validate_currency_code,
     validate_number,
 )
 
@@ -147,7 +147,7 @@ class Wallet:
     """Manage a nonnegative balance for one currency"""
 
     def __init__(self, currency_code: str, balance: float = 0.0) -> None:
-        self._currency_code = validate_currency_code(currency_code)
+        self._currency_code = get_currency(currency_code).code
         self.balance = balance
 
     @property
@@ -220,7 +220,7 @@ class Portfolio:
 
         if wallets is not None:
             for code, wallet in wallets.items():
-                code = validate_currency_code(code)
+                code = get_currency(code).code
 
                 if not isinstance(wallet, Wallet):
                     raise TypeError("Значение словаря должно быть объектом Wallet")
@@ -250,7 +250,7 @@ class Portfolio:
 
     def add_currency(self, currency_code: str) -> Wallet:
         """Create a wallet if absent, otherwise return the existing wallet"""
-        code = validate_currency_code(currency_code)
+        code = get_currency(currency_code).code
 
         if code not in self._wallets:
             self._wallets[code] = Wallet(code)
@@ -259,7 +259,7 @@ class Portfolio:
 
     def get_wallet(self, currency_code: str) -> Wallet:
         """Return a wallet, raising ValueError if it does not exist"""
-        code = validate_currency_code(currency_code)
+        code = get_currency(currency_code).code
 
         if code not in self._wallets:
             raise ValueError(f"Кошелек '{code}' не найден")
@@ -276,7 +276,7 @@ class Portfolio:
         Use temporary rates only when rates is None. USD has an implicit rate
         of 1. The caller loads rates from storage; this model performs no I/O.
         """
-        base = validate_currency_code(base_currency)
+        base = get_currency(base_currency).code
 
         exchange_rates = EXCHANGE_RATES if rates is None else rates
 

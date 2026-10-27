@@ -3,16 +3,19 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from valutatrade_hub.core.exceptions import InsufficientFundsError
+from valutatrade_hub.core.currencies import CURRENCIES, get_currency
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+)
 from valutatrade_hub.core.models import Portfolio, User, Wallet
 from valutatrade_hub.core.utils import (
     EXCHANGE_RATES,
-    SUPPORTED_CURRENCIES,
     load_json,
     load_records,
     save_json,
     validate_amount,
-    validate_currency_code,
     validate_number,
 )
 from valutatrade_hub.infra import settings
@@ -113,6 +116,9 @@ def _load_portfolio(user_id: int, *, user: User | None = None) -> Portfolio:
         }
 
         return Portfolio(user_id=record["user_id"], wallets=wallets, user=user)
+    except CurrencyNotFoundError:
+        # Preserve CurrencyNotFoundError before handling other ValueError exceptions
+        raise
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(
             f"Некорректные данные портфеля в файле '{PORTFOLIOS_FILE}'"
@@ -124,22 +130,23 @@ def show_portfolio(user: User | None, base_currency: str = "USD") -> dict:
     if user is None:
         raise ValueError("Сначала выполните login")
 
-    base = validate_currency_code(base_currency)
-
-    if base not in SUPPORTED_CURRENCIES:
-        raise ValueError(f"Неизвестная базовая валюта '{base}'")
-
+    base = get_currency(base_currency).code
     portfolio = _load_portfolio(user.user_id, user=user)
-    total_value = portfolio.get_total_value(base_currency=base, rates=EXCHANGE_RATES)
-    base_rate = 1.0 if base == "USD" else EXCHANGE_RATES[base]
+    usd_rates = {base: _get_stub_usd_rate(base)}
+
+    for code, wallet in portfolio.wallets.items():
+        if wallet.balance > 0:
+            usd_rates[code] = _get_stub_usd_rate(code)
+
+    total_value = portfolio.get_total_value(base_currency=base, rates=usd_rates)
+    base_rate = usd_rates[base]
     rows = []
 
     for code, wallet in portfolio.wallets.items():
         value = 0.0
 
         if wallet.balance > 0:
-            usd_rate = 1.0 if code == "USD" else EXCHANGE_RATES[code]
-            value = wallet.balance * (usd_rate / base_rate)
+            value = wallet.balance * (usd_rates[code] / base_rate)
 
         rows.append((code, wallet.balance, value))
 
@@ -188,10 +195,7 @@ def _trade(
     if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
         raise ValueError("ID пользователя должен быть положительным целым числом")
 
-    code = validate_currency_code(currency_code)
-
-    if code not in SUPPORTED_CURRENCIES:
-        raise ValueError(f"Неизвестная валюта '{code}'")
+    code = get_currency(currency_code).code
 
     if code == "USD":
         raise ValueError("USD используется для расчетов: выберите другую валюту")
@@ -213,14 +217,7 @@ def _trade(
     else:
         wallet = portfolio.add_currency(code)
 
-    if code not in EXCHANGE_RATES:
-        raise ValueError(f"Не удалось получить курс для {code}→USD")
-
-    rate = validate_number(EXCHANGE_RATES[code])
-
-    if rate <= 0:
-        raise ValueError(f"Курс для {code}→USD должен быть положительным")
-
+    rate = _get_stub_usd_rate(code)
     value_usd = validate_amount(amount * rate)
 
     usd_wallet = portfolio.add_currency("USD")
@@ -247,6 +244,24 @@ def _trade(
         "usd_before": usd_before,
         "usd_after": usd_wallet.balance,
     }
+
+
+def _get_stub_usd_rate(code: str) -> float:
+    """Validate a stub quote and distinguish provider errors from unknown codes"""
+    if code == "USD":
+        return 1.0
+
+    try:
+        rate = validate_number(EXCHANGE_RATES[code])
+
+        if rate <= 0:
+            raise ValueError("Курс должен быть положительным")
+    except (KeyError, TypeError, ValueError) as error:
+        raise ApiRequestError(
+            reason=f"Не удалось получить курс для {code}→USD"
+        ) from error
+
+    return rate
 
 
 def _get_cached_rate(
@@ -300,10 +315,10 @@ def _fetch_stub_rates(now: datetime) -> dict:
     timestamp = now.isoformat(timespec="seconds")
     cache = {
         f"{code}_USD": {
-            "rate": validate_amount(rate),
+            "rate": _get_stub_usd_rate(code),
             "updated_at": timestamp,
         }
-        for code, rate in EXCHANGE_RATES.items()
+        for code in CURRENCIES
         if code != "USD"
     }
     cache["source"] = "Stub"
@@ -314,12 +329,8 @@ def _fetch_stub_rates(now: datetime) -> dict:
 
 def get_rate(from_currency: str, to_currency: str) -> dict:
     """Return a cached rate or refresh it from the stub without requiring login"""
-    from_currency = validate_currency_code(from_currency)
-    to_currency = validate_currency_code(to_currency)
-
-    for code in (from_currency, to_currency):
-        if code not in SUPPORTED_CURRENCIES:
-            raise ValueError(f"Неизвестная валюта '{code}'")
+    from_currency = get_currency(from_currency).code
+    to_currency = get_currency(to_currency).code
 
     now = datetime.now(UTC)
 
@@ -340,19 +351,17 @@ def get_rate(from_currency: str, to_currency: str) -> dict:
     result = _get_cached_rate(cache, from_currency, to_currency, now)
 
     if result is None:
-        unavailable = (
-            f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже."
-        )
+        unavailable = f"Курс {from_currency}→{to_currency} недоступен"
 
         try:
             cache = _fetch_stub_rates(now)
         except (TypeError, ValueError, OSError) as error:
-            raise ValueError(unavailable) from error
+            raise ApiRequestError(reason=unavailable) from error
 
         result = _get_cached_rate(cache, from_currency, to_currency, now)
 
         if result is None:
-            raise ValueError(unavailable)
+            raise ApiRequestError(reason=unavailable)
 
         save_json(RATES_FILE, cache)
 

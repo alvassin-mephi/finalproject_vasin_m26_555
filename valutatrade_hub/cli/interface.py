@@ -5,6 +5,12 @@ import shlex
 
 from prettytable import PrettyTable
 
+from valutatrade_hub.core.currencies import CURRENCIES, CryptoCurrency, get_currency
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+)
 from valutatrade_hub.core.models import User
 from valutatrade_hub.core.usecases import (
     buy,
@@ -58,7 +64,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _format_amount(amount: float, currency_code: str) -> str:
     """Keep eight decimal places for crypto amounts and two for fiat amounts"""
-    precision = 8 if currency_code in ("BTC", "ETH") else 2
+    precision = 8 if isinstance(get_currency(currency_code), CryptoCurrency) else 2
 
     return f"{amount:,.{precision}f}"
 
@@ -198,6 +204,14 @@ def main() -> None:
 
             elif command.command == "exit":
                 break
+        except InsufficientFundsError as error:
+            print(error)
+        except CurrencyNotFoundError as error:
+            print(error)
+            print(f"Поддерживаемые валюты: {', '.join(CURRENCIES)}")
+        except ApiRequestError as error:
+            print(error)
+            print("Повторите попытку позже.")
         except (TypeError, ValueError) as error:
             print(error)
         except OSError as error:
