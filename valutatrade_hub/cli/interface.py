@@ -6,7 +6,14 @@ import shlex
 from prettytable import PrettyTable
 
 from valutatrade_hub.core.models import User
-from valutatrade_hub.core.usecases import buy, login, register, sell, show_portfolio
+from valutatrade_hub.core.usecases import (
+    buy,
+    get_rate,
+    login,
+    register,
+    sell,
+    show_portfolio,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -36,6 +43,12 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument(
             "--amount", required=True, type=float, help="Количество единиц валюты"
         )
+
+    rate_command = commands.add_parser(
+        "get-rate", help="Показать курс валюты", allow_abbrev=False
+    )
+    rate_command.add_argument("--from", dest="from_currency", required=True)
+    rate_command.add_argument("--to", dest="to_currency", required=True)
 
     commands.add_parser("help", help="Показать список команд")
     commands.add_parser("exit", help="Завершить работу")
@@ -93,6 +106,16 @@ def _print_trade(report: dict) -> None:
         f"→ стало {_format_amount(report['usd_after'], 'USD')}"
     )
     print(f"{value_label}: {_format_amount(report['value_usd'], 'USD')} USD")
+
+
+def _print_rate(report: dict) -> None:
+    """Display both rate directions and the timestamp with its UTC offset"""
+    source = report["from_currency"]
+    target = report["to_currency"]
+    timestamp = report["updated_at"].replace("T", " ")
+
+    print(f"Курс {source}→{target}: {report['rate']:.8f} (обновлено: {timestamp})")
+    print(f"Обратный курс {target}→{source}: {report['reverse_rate']:.8f}")
 
 
 def main() -> None:
@@ -161,6 +184,14 @@ def main() -> None:
                 )
 
                 _print_trade(report)
+
+            elif command.command == "get-rate":
+                report = get_rate(
+                    from_currency=command.from_currency,
+                    to_currency=command.to_currency,
+                )
+
+                _print_rate(report)
 
             elif command.command == "help":
                 parser.print_help()

@@ -1,6 +1,6 @@
 """Application operations for managing users and currency portfolios"""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from valutatrade_hub.core.exceptions import InsufficientFundsError
@@ -8,8 +8,9 @@ from valutatrade_hub.core.models import Portfolio, User, Wallet
 from valutatrade_hub.core.utils import (
     EXCHANGE_RATES,
     SUPPORTED_CURRENCIES,
+    load_json,
     load_records,
-    save_records,
+    save_json,
     validate_amount,
     validate_currency_code,
     validate_number,
@@ -18,6 +19,7 @@ from valutatrade_hub.infra import settings
 
 USERS_FILE = Path("data/users.json")
 PORTFOLIOS_FILE = Path("data/portfolios.json")
+RATES_FILE = Path("data/rates.json")
 
 
 def _restore_user(record: dict) -> User:
@@ -63,12 +65,12 @@ def register(username: str, password: str) -> User:
         "wallets": {"USD": {"balance": usd_wallet.balance}},
     }
 
-    save_records(USERS_FILE, records + [user_record])
+    save_json(USERS_FILE, records + [user_record])
 
     try:
-        save_records(PORTFOLIOS_FILE, portfolios + [portfolio_record])
+        save_json(PORTFOLIOS_FILE, portfolios + [portfolio_record])
     except (OSError, TypeError, ValueError):
-        save_records(USERS_FILE, records)
+        save_json(USERS_FILE, records)
 
         raise
 
@@ -159,7 +161,7 @@ def _save_portfolio(portfolio: Portfolio) -> None:
                 code: {"balance": wallet.balance}
                 for code, wallet in portfolio.wallets.items()
             }
-            save_records(PORTFOLIOS_FILE, records)
+            save_json(PORTFOLIOS_FILE, records)
 
             return
 
@@ -245,3 +247,113 @@ def _trade(
         "usd_before": usd_before,
         "usd_after": usd_wallet.balance,
     }
+
+
+def _get_cached_rate(
+    cache: dict, from_currency: str, to_currency: str, now: datetime
+) -> dict | None:
+    """Resolve a pair through fresh USD quotes, using their oldest timestamp"""
+    usd_rates = {"USD": 1.0}
+    timestamps = []
+
+    try:
+        for code in (from_currency, to_currency):
+            if code == "USD":
+                continue
+
+            entry = cache[f"{code}_USD"]
+            rate = validate_number(entry["rate"])
+            updated_at = datetime.fromisoformat(entry["updated_at"])
+
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=UTC)
+
+            updated_at = updated_at.astimezone(UTC)
+            age = (now - updated_at).total_seconds()
+
+            if rate <= 0 or not 0 <= age < settings.RATES_TTL_SECONDS:
+                return None
+
+            usd_rates[code] = rate
+            timestamps.append(updated_at)
+
+        rate = validate_number(usd_rates[from_currency] / usd_rates[to_currency])
+        reverse_rate = validate_number(
+            usd_rates[to_currency] / usd_rates[from_currency]
+        )
+
+        if rate <= 0 or reverse_rate <= 0:
+            return None
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+    return {
+        "rate": rate,
+        "reverse_rate": reverse_rate,
+        # A cross rate is only as fresh as its oldest quote
+        "updated_at": min(timestamps).isoformat(timespec="seconds"),
+    }
+
+
+def _fetch_stub_rates(now: datetime) -> dict:
+    """Build a cache snapshot from the assignment's fixed USD prices"""
+    timestamp = now.isoformat(timespec="seconds")
+    cache = {
+        f"{code}_USD": {
+            "rate": validate_amount(rate),
+            "updated_at": timestamp,
+        }
+        for code, rate in EXCHANGE_RATES.items()
+        if code != "USD"
+    }
+    cache["source"] = "Stub"
+    cache["last_refresh"] = timestamp
+
+    return cache
+
+
+def get_rate(from_currency: str, to_currency: str) -> dict:
+    """Return a cached rate or refresh it from the stub without requiring login"""
+    from_currency = validate_currency_code(from_currency)
+    to_currency = validate_currency_code(to_currency)
+
+    for code in (from_currency, to_currency):
+        if code not in SUPPORTED_CURRENCIES:
+            raise ValueError(f"Неизвестная валюта '{code}'")
+
+    now = datetime.now(UTC)
+
+    if from_currency == to_currency:
+        return {
+            "from_currency": from_currency,
+            "to_currency": to_currency,
+            "rate": 1.0,
+            "reverse_rate": 1.0,
+            "updated_at": now.isoformat(timespec="seconds"),
+        }
+
+    cache = load_json(RATES_FILE, default={})
+
+    if not isinstance(cache, dict):
+        raise ValueError(f"Файл '{RATES_FILE}' должен содержать объект с курсами")
+
+    result = _get_cached_rate(cache, from_currency, to_currency, now)
+
+    if result is None:
+        unavailable = (
+            f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже."
+        )
+
+        try:
+            cache = _fetch_stub_rates(now)
+        except (TypeError, ValueError, OSError) as error:
+            raise ValueError(unavailable) from error
+
+        result = _get_cached_rate(cache, from_currency, to_currency, now)
+
+        if result is None:
+            raise ValueError(unavailable)
+
+        save_json(RATES_FILE, cache)
+
+    return {"from_currency": from_currency, "to_currency": to_currency, **result}

@@ -57,15 +57,20 @@ def validate_amount(amount: float) -> float:
     return amount
 
 
-def load_records(file_path: Path) -> list[dict]:
-    """Read JSON records, treating a missing file as an empty collection"""
+def load_json(file_path: Path, *, default: list | dict) -> object:
+    """Read JSON data, returning the supplied default only when the file is absent"""
     try:
         with file_path.open(encoding="utf-8") as source:
-            records = json.load(source)
+            return json.load(source)
     except FileNotFoundError:
-        return []
+        return default
     except json.JSONDecodeError as error:
         raise ValueError(f"Некорректный JSON в файле '{file_path}'") from error
+
+
+def load_records(file_path: Path) -> list[dict]:
+    """Read JSON records, treating a missing file as an empty collection"""
+    records = load_json(file_path, default=[])
 
     if not isinstance(records, list) or any(
         not isinstance(record, dict) for record in records
@@ -75,8 +80,8 @@ def load_records(file_path: Path) -> list[dict]:
     return records
 
 
-def save_records(file_path: Path, records: list[dict]) -> None:
-    """Write JSON records through a temporary file to avoid partial writes"""
+def save_json(file_path: Path, data: list | dict) -> None:
+    """Write JSON data through a temporary file to avoid partial writes"""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = None
 
@@ -90,7 +95,7 @@ def save_records(file_path: Path, records: list[dict]) -> None:
             delete=False,
         ) as target:
             temporary_path = Path(target.name)
-            json.dump(records, target, ensure_ascii=False, indent=2, allow_nan=False)
+            json.dump(data, target, ensure_ascii=False, indent=2, allow_nan=False)
             target.write("\n")
 
         temporary_path.replace(file_path)
