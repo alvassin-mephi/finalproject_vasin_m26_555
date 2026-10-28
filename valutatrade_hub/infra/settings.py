@@ -13,6 +13,9 @@ DEFAULT_SETTINGS = {
     "DEFAULT_BASE_CURRENCY": "USD",
     "LOG_FILE": "logs/actions.log",
     "LOG_FORMAT": "%(levelname)s %(asctime)s %(message)s",
+    "LOG_LEVEL": "INFO",
+    "LOG_MAX_BYTES": 1_048_576,
+    "LOG_BACKUP_COUNT": 3,
 }
 
 

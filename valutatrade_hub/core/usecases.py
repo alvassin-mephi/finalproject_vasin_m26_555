@@ -13,6 +13,7 @@ from valutatrade_hub.core.utils import (
     validate_amount,
     validate_number,
 )
+from valutatrade_hub.decorators import log_action
 from valutatrade_hub.infra.database import DatabaseManager
 from valutatrade_hub.infra.settings import SettingsLoader
 
@@ -99,11 +100,13 @@ def show_portfolio(user: User | None, base_currency: str | None = None) -> dict:
     }
 
 
+@log_action(verbose=True)
 def buy(user_id: int | None, currency_code: str, amount: float) -> dict:
     """Buy currency using the user's USD balance"""
     return _trade(user_id, currency_code, amount, is_sale=False)
 
 
+@log_action(verbose=True)
 def sell(user_id: int | None, currency_code: str, amount: float) -> dict:
     """Sell currency and credit the proceeds to the user's USD wallet"""
     return _trade(user_id, currency_code, amount, is_sale=True)

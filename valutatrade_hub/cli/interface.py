@@ -20,6 +20,7 @@ from valutatrade_hub.core.usecases import (
     sell,
     show_portfolio,
 )
+from valutatrade_hub.logging_config import setup_logging
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -126,6 +127,13 @@ def _print_rate(report: dict) -> None:
 
 def main() -> None:
     """Run the command loop and keep the current user in memory"""
+    try:
+        setup_logging()
+    except (OSError, TypeError, ValueError) as error:
+        print(f"Не удалось настроить логирование: {error}")
+
+        return
+
     parser = _build_parser()
     current_user: User | None = None
 

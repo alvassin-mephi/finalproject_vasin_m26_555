@@ -160,6 +160,11 @@ TTL задается параметром `RATES_TTL_SECONDS` в `pyproject.toml
 | `INITIAL_USD_BALANCE` | `10_000.0` | Стартовый баланс в USD для новых пользователей |
 | `RATES_TTL_SECONDS` | `300` | Срок актуальности курсов валют, в секундах |
 | `DEFAULT_BASE_CURRENCY` | `USD` | Базовая валюта для `show-portfolio` без `--base` |
+| `LOG_FILE` | `logs/actions.log` | Журнал операций `buy` и `sell` |
+| `LOG_FORMAT` | `%(levelname)s %(asctime)s %(message)s` | Формат записей в файлах логов |
+| `LOG_LEVEL` | `INFO` | Минимальный уровень логирования |
+| `LOG_MAX_BYTES` | `1_048_576` | Размер файла для ротации, в байтах (по умолчанию 1 МиБ) |
+| `LOG_BACKUP_COUNT` | `3` | Количество архивных файлов для каждого журнала |
 
 Для относительных путей используется рабочая папка.
 JSON-файлы создаются во время работы приложения.
@@ -172,6 +177,8 @@ valutatrade_hub/
     core/               # models and business logic
     infra/              # configuration and JSON storage
     parser_service/     # exchange rate retrieval and storage
+    decorators.py       # trade logging decorator
+    logging_config.py   # file logging and rotation
     __main__.py         # package entry point for python -m
 
 data/
