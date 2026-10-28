@@ -74,11 +74,10 @@ def show_portfolio(user: User | None, base_currency: str | None = None) -> dict:
 
     base = get_currency(base_currency).code
     portfolio = _load_portfolio(user.user_id, user=user)
-    usd_rates = {base: _get_stub_usd_rate(base)}
-
-    for code, wallet in portfolio.wallets.items():
-        if wallet.balance > 0:
-            usd_rates[code] = _get_stub_usd_rate(code)
+    currency_codes = {
+        code for code, wallet in portfolio.wallets.items() if wallet.balance > 0
+    }
+    usd_rates = _load_rates(currency_codes, base_currency=base)["rates"]
 
     total_value = portfolio.get_total_value(base_currency=base, rates=usd_rates)
     base_rate = usd_rates[base]
@@ -144,7 +143,7 @@ def _trade(
     else:
         wallet = portfolio.add_currency(code)
 
-    rate = _get_stub_usd_rate(code)
+    rate = get_rate(code, "USD")["rate"]
     value_usd = validate_amount(amount * rate)
 
     usd_wallet = portfolio.add_currency("USD")
@@ -191,15 +190,15 @@ def _get_stub_usd_rate(code: str) -> float:
     return rate
 
 
-def _get_cached_rate(
-    cache: dict, from_currency: str, to_currency: str, now: datetime
+def _get_cached_rates(
+    cache: dict, currency_codes: set[str], base_currency: str, now: datetime
 ) -> dict | None:
-    """Resolve a pair through fresh USD quotes, using their oldest timestamp"""
+    """Validate all required USD quotes and conversions from one cache snapshot"""
     usd_rates = {"USD": 1.0}
     timestamps = []
 
     try:
-        for code in (from_currency, to_currency):
+        for code in currency_codes | {base_currency}:
             if code == "USD":
                 continue
 
@@ -219,21 +218,21 @@ def _get_cached_rate(
             usd_rates[code] = rate
             timestamps.append(updated_at)
 
-        rate = validate_number(usd_rates[from_currency] / usd_rates[to_currency])
-        reverse_rate = validate_number(
-            usd_rates[to_currency] / usd_rates[from_currency]
-        )
+        base_rate = usd_rates[base_currency]
 
-        if rate <= 0 or reverse_rate <= 0:
-            return None
+        for code in currency_codes:
+            rate = validate_number(usd_rates[code] / base_rate)
+            reverse_rate = validate_number(base_rate / usd_rates[code])
+
+            if rate <= 0 or reverse_rate <= 0:
+                return None
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
 
     return {
-        "rate": rate,
-        "reverse_rate": reverse_rate,
+        "rates": usd_rates,
         # A cross rate is only as fresh as its oldest quote
-        "updated_at": min(timestamps).isoformat(timespec="seconds"),
+        "updated_at": min(timestamps, default=now).isoformat(timespec="seconds"),
     }
 
 
@@ -254,12 +253,44 @@ def _fetch_stub_rates(now: datetime) -> dict:
     return cache
 
 
+def _load_rates(currency_codes: set[str], base_currency: str = "USD") -> dict:
+    """Load a fresh USD snapshot, refreshing all required quotes together once"""
+    now = datetime.now(UTC)
+    required_codes = currency_codes | {base_currency}
+
+    if required_codes <= {"USD"}:
+        return {
+            "rates": {"USD": 1.0},
+            "updated_at": now.isoformat(timespec="seconds"),
+        }
+
+    cache = database.get_rates()
+
+    snapshot = _get_cached_rates(cache, currency_codes, base_currency, now)
+
+    if snapshot is None:
+        codes = ", ".join(sorted(required_codes - {"USD"}))
+        unavailable = f"Не удалось получить актуальные курсы для {codes}"
+
+        try:
+            cache = _fetch_stub_rates(now)
+        except (TypeError, ValueError, OSError) as error:
+            raise ApiRequestError(reason=unavailable) from error
+
+        snapshot = _get_cached_rates(cache, currency_codes, base_currency, now)
+
+        if snapshot is None:
+            raise ApiRequestError(reason=unavailable)
+
+        database.save_rates(cache)
+
+    return snapshot
+
+
 def get_rate(from_currency: str, to_currency: str) -> dict:
-    """Return a cached rate or refresh it from the stub without requiring login"""
+    """Return a pair from the shared rate source without requiring login"""
     from_currency = get_currency(from_currency).code
     to_currency = get_currency(to_currency).code
-
-    now = datetime.now(UTC)
 
     if from_currency == to_currency:
         return {
@@ -267,26 +298,16 @@ def get_rate(from_currency: str, to_currency: str) -> dict:
             "to_currency": to_currency,
             "rate": 1.0,
             "reverse_rate": 1.0,
-            "updated_at": now.isoformat(timespec="seconds"),
+            "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
 
-    cache = database.get_rates()
+    snapshot = _load_rates({from_currency, to_currency}, base_currency=to_currency)
+    usd_rates = snapshot["rates"]
 
-    result = _get_cached_rate(cache, from_currency, to_currency, now)
-
-    if result is None:
-        unavailable = f"Курс {from_currency}→{to_currency} недоступен"
-
-        try:
-            cache = _fetch_stub_rates(now)
-        except (TypeError, ValueError, OSError) as error:
-            raise ApiRequestError(reason=unavailable) from error
-
-        result = _get_cached_rate(cache, from_currency, to_currency, now)
-
-        if result is None:
-            raise ApiRequestError(reason=unavailable)
-
-        database.save_rates(cache)
-
-    return {"from_currency": from_currency, "to_currency": to_currency, **result}
+    return {
+        "from_currency": from_currency,
+        "to_currency": to_currency,
+        "rate": usd_rates[from_currency] / usd_rates[to_currency],
+        "reverse_rate": usd_rates[to_currency] / usd_rates[from_currency],
+        "updated_at": snapshot["updated_at"],
+    }
