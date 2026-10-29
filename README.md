@@ -26,6 +26,7 @@
   - [get-rate - курс обмена валют](#get-rate---курс-обмена-валют)
   - [exit - выход из программы](#exit---выход-из-программы)
 - [Кэш курсов валют](#кэш-курсов-валют)
+- [API-клиенты Parser Service](#api-клиенты-parser-service)
 - [Настройки](#настройки)
 - [Структура](#структура)
 - [Проверка кода и сборка](#проверка-кода-и-сборка)
@@ -36,8 +37,19 @@
 
 ```sh
 uv sync
+```
+
+Курсы криптовалют загружаются из [CoinGecko](https://docs.coingecko.com/demo/reference/simple-price),
+фиатных валют - из [ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests).
+Для вызова ExchangeRate-API укажите ключ в переменной окружения:
+
+```sh
+export EXCHANGERATE_API_KEY="..."
 uv run valutatrade
 ```
+
+Опционально можно указать Demo-ключ для CoinGecko в `COINGECKO_API_KEY`,
+без него используется публичный доступ с ограничениями сервиса.
 
 Другие способы запуска: `uv run python main.py` и
 `uv run python -m valutatrade_hub`.
@@ -145,6 +157,16 @@ TTL задается параметром `RATES_TTL_SECONDS` в `pyproject.toml
 через заглушку с фиксированными курсами из задания, без сетевых запросов.
 Курс обмена двух валют рассчитывается через USD.
 
+## API-клиенты Parser Service
+
+Клиенты API можно вызвать отдельно; результат выводится без записи в кэш:
+
+```sh
+uv run python -c 'from valutatrade_hub.parser_service.api_clients import CoinGeckoClient; print(CoinGeckoClient().fetch_rates())'
+```
+
+Команды CLI пока обновляют кэш через заглушку.
+
 ## Настройки
 
 Параметры приложения задаются в `[tool.valutatrade]` файла `pyproject.toml`.
@@ -163,6 +185,13 @@ TTL задается параметром `RATES_TTL_SECONDS` в `pyproject.toml
 | `LOG_LEVEL` | `INFO` | Минимальный уровень логирования |
 | `LOG_MAX_BYTES` | `1_048_576` | Размер файла для ротации, в байтах (по умолчанию 1 МиБ) |
 | `LOG_BACKUP_COUNT` | `3` | Количество архивных файлов для каждого журнала |
+
+Ключи API задаются через переменные окружения:
+
+| Переменная | Назначение |
+| --- | --- |
+| `EXCHANGERATE_API_KEY` | Ключ ExchangeRate-API; обязателен для загрузки фиатных курсов валют |
+| `COINGECKO_API_KEY` | Необязательный Demo-ключ CoinGecko; без него используется публичный доступ |
 
 Для относительных путей используется рабочая папка.
 JSON-файлы создаются во время работы приложения.

@@ -8,6 +8,7 @@ DEFAULT_SETTINGS = {
     "USERS_FILE": "data/users.json",
     "PORTFOLIOS_FILE": "data/portfolios.json",
     "RATES_FILE": "data/rates.json",
+    "HISTORY_FILE": "data/exchange_rates.json",
     "INITIAL_USD_BALANCE": 10_000.0,
     "RATES_TTL_SECONDS": 300,
     "DEFAULT_BASE_CURRENCY": "USD",
