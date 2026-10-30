@@ -15,6 +15,23 @@ from valutatrade_hub.parser_service.storage import RatesStorage, make_records
 
 logger = logging.getLogger(PARSER_LOGGER_NAME)
 
+API_CLIENTS = {
+    "coingecko": CoinGeckoClient,
+    "exchangerate": ExchangeRateApiClient,
+}
+
+
+def update_rates(source: str | None = None) -> dict:
+    """Run all configured providers or one selected by its CLI name"""
+    if source is not None and source not in API_CLIENTS:
+        raise ValueError(f"Неизвестный источник курсов: {source}")
+
+    storage = RatesStorage()
+    client_types = API_CLIENTS.values() if source is None else [API_CLIENTS[source]]
+    clients = [client_type(config=storage.config) for client_type in client_types]
+
+    return RatesUpdater(clients=clients, storage=storage).run_update()
+
 
 class RatesUpdater:
     """Poll providers independently and save all successful measurements"""
@@ -29,8 +46,8 @@ class RatesUpdater:
             clients
             if clients is not None
             else [
-                CoinGeckoClient(config=self.storage.config),
-                ExchangeRateApiClient(config=self.storage.config),
+                client_type(config=self.storage.config)
+                for client_type in API_CLIENTS.values()
             ]
         )
 

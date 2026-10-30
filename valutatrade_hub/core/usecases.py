@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from valutatrade_hub.core.currencies import get_currency
+from valutatrade_hub.core.currencies import CURRENCIES, CryptoCurrency, get_currency
 from valutatrade_hub.core.exceptions import (
     ApiRequestError,
     InsufficientFundsError,
@@ -181,11 +181,18 @@ def _trade(
 
 
 def _get_cached_rates(
-    cache: dict, currency_codes: set[str], base_currency: str, now: datetime
+    cache: dict,
+    currency_codes: set[str],
+    base_currency: str,
+    now: datetime,
+    *,
+    allow_stale: bool = False,
 ) -> dict | None:
-    """Validate all required USD quotes and conversions from one cache snapshot"""
+    """Validate quotes, optionally retaining stale entries for cache inspection"""
     usd_rates = {"USD": 1.0}
     timestamps = []
+    sources = set()
+    is_stale = False
 
     try:
         pairs = cache["pairs"]
@@ -209,11 +216,18 @@ def _get_cached_rates(
             updated_at = updated_at.astimezone(UTC)
             age = (now - updated_at).total_seconds()
 
-            if rate <= 0 or not 0 <= age < settings.get("RATES_TTL_SECONDS"):
+            if rate <= 0 or age < 0:
+                return None
+
+            entry_is_stale = age >= settings.get("RATES_TTL_SECONDS")
+
+            if entry_is_stale and not allow_stale:
                 return None
 
             usd_rates[code] = rate
             timestamps.append(updated_at)
+            sources.add(source.strip())
+            is_stale = is_stale or entry_is_stale
 
         base_rate = usd_rates[base_currency]
 
@@ -230,6 +244,8 @@ def _get_cached_rates(
         "rates": usd_rates,
         # A cross rate is only as fresh as its oldest quote
         "updated_at": min(timestamps, default=now).isoformat(timespec="seconds"),
+        "source": ", ".join(sorted(sources)),
+        "stale": is_stale,
     }
 
 
@@ -253,7 +269,7 @@ def _load_rates(currency_codes: set[str], base_currency: str = "USD") -> dict:
 
         raise ApiRequestError(
             reason=f"Курсы для {codes} отсутствуют, устарели или некорректны. "
-            "Обновите курсы через Parser Service (см. README)."
+            "Выполните update-rates для обновления кэша."
         )
 
     return snapshot
@@ -283,3 +299,92 @@ def get_rate(from_currency: str, to_currency: str) -> dict:
         "reverse_rate": usd_rates[to_currency] / usd_rates[from_currency],
         "updated_at": snapshot["updated_at"],
     }
+
+
+def show_rates(
+    currency: str | None = None,
+    top: int | None = None,
+    base_currency: str = "USD",
+) -> dict:
+    """Inspect valid cached quotes, including their sources and freshness"""
+    base = get_currency(base_currency).code
+    code = get_currency(currency).code if currency is not None else None
+
+    if top is not None and (
+        isinstance(top, bool) or not isinstance(top, int) or top <= 0
+    ):
+        raise ValueError("--top должен быть положительным целым числом")
+
+    cache = database.get_rates()
+
+    if not cache or ("pairs" not in cache and cache.get("source") == "Stub"):
+        raise ApiRequestError(
+            reason="Локальный кэш курсов пуст. Выполните update-rates."
+        )
+
+    pairs = cache.get("pairs")
+
+    if not isinstance(pairs, dict):
+        raise ValueError("В кэше курсов отсутствует объект pairs")
+
+    if not pairs:
+        raise ApiRequestError(
+            reason="Локальный кэш курсов пуст. Выполните update-rates."
+        )
+
+    codes = (
+        {code}
+        if code is not None
+        else {code for code in CURRENCIES if f"{code}_USD" in pairs}
+    )
+
+    if top is not None:
+        codes = {
+            code for code in codes if isinstance(get_currency(code), CryptoCurrency)
+        }
+
+    if not codes:
+        raise ValueError("В кэше нет валют, подходящих под выбранные фильтры")
+
+    now = datetime.now(UTC)
+
+    if _get_cached_rates(cache, set(), base, now, allow_stale=True) is None:
+        raise ApiRequestError(
+            reason=f"Курс базовой валюты {base} отсутствует или некорректен. "
+            "Выполните update-rates."
+        )
+
+    rows = []
+    unavailable = []
+
+    for code in sorted(codes):
+        snapshot = _get_cached_rates(cache, {code}, base, now, allow_stale=True)
+
+        if snapshot is None:
+            unavailable.append(code)
+            continue
+
+        rates = snapshot["rates"]
+        rows.append(
+            {
+                "currency": code,
+                "rate": rates[code] / rates[base],
+                "updated_at": (
+                    None if code == base == "USD" else snapshot["updated_at"]
+                ),
+                "source": snapshot["source"],
+                "stale": snapshot["stale"],
+            }
+        )
+
+    if not rows:
+        raise ApiRequestError(
+            reason=f"Нет корректных курсов для {', '.join(unavailable)}. "
+            "Выполните update-rates."
+        )
+
+    if top is not None:
+        rows.sort(key=lambda row: (-row["rate"], row["currency"]))
+        rows = rows[:top]
+
+    return {"base_currency": base, "rates": rows, "unavailable": unavailable}

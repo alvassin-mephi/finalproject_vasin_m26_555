@@ -19,8 +19,11 @@ from valutatrade_hub.core.usecases import (
     register,
     sell,
     show_portfolio,
+    show_rates,
 )
-from valutatrade_hub.logging_config import setup_logging
+from valutatrade_hub.infra.settings import SettingsLoader
+from valutatrade_hub.logging_config import setup_logging, setup_parser_logging
+from valutatrade_hub.parser_service.updater import API_CLIENTS, update_rates
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -56,6 +59,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     rate_command.add_argument("--from", dest="from_currency", required=True)
     rate_command.add_argument("--to", dest="to_currency", required=True)
+
+    update_command = commands.add_parser(
+        "update-rates", help="Обновить курсы валют через API", allow_abbrev=False
+    )
+    update_command.add_argument(
+        "--source", choices=API_CLIENTS, help="Источник (по умолчанию все)"
+    )
+
+    rates_command = commands.add_parser(
+        "show-rates", help="Показать курсы валют из кэша", allow_abbrev=False
+    )
+    rates_command.add_argument("--currency", help="Код валюты")
+    rates_command.add_argument("--top", type=int, help="N самых дорогих криптовалют")
+    rates_command.add_argument("--base", default="USD", help="Базовая валюта")
 
     commands.add_parser("help", help="Показать список команд")
     commands.add_parser("exit", help="Завершить работу")
@@ -125,10 +142,75 @@ def _print_rate(report: dict) -> None:
     print(f"Обратный курс {target}→{source}: {report['reverse_rate']:.8f}")
 
 
+def _print_update(report: dict) -> None:
+    """Distinguish a complete update from one with failed providers"""
+    if report["errors"]:
+        print(f"Обновление завершено с ошибками. Обновлено пар: {report['updated']}.")
+
+        for source, error in report["errors"].items():
+            print(f"- {source}: {error}")
+
+        print(f"Подробности: {SettingsLoader().get('PARSER_LOG_FILE')}")
+    else:
+        print(f"Обновление завершено. Обновлено пар: {report['updated']}.")
+
+    if report["last_refresh"] is not None:
+        print(f"Последнее обновление кэша: {report['last_refresh']}")
+
+
+def _print_rates(report: dict) -> None:
+    """Display cached quotes with sources, freshness, and validation warnings"""
+    base = report["base_currency"]
+    table = PrettyTable(
+        ["Пара", "Курс валюты", "Получено (UTC)", "Источник", "Статус кэша"]
+    )
+    table.align = "l"
+    table.align["Курс валюты"] = "r"
+
+    for row in report["rates"]:
+        timestamp = row["updated_at"]
+
+        status = "—"
+
+        if timestamp is not None:
+            timestamp = timestamp.replace("T", " ")
+            status = "устарел" if row["stale"] else "актуален"
+
+        table.add_row(
+            [
+                f"{row['currency']}_{base}",
+                f"{row['rate']:.8g}",
+                timestamp or "—",
+                row["source"] or "—",
+                status,
+            ]
+        )
+
+    print(f"Курсы валют из кэша (база: {base}):")
+    print(table)
+
+    stale_pairs = [
+        f"{row['currency']}_{base}" for row in report["rates"] if row["stale"]
+    ]
+
+    if stale_pairs:
+        print(
+            f"Пары с устаревшим кэшем: {', '.join(stale_pairs)}. "
+            "Выполните update-rates."
+        )
+
+    if report["unavailable"]:
+        print(
+            f"Пропущены отсутствующие или некорректные курсы: "
+            f"{', '.join(report['unavailable'])}. Выполните update-rates."
+        )
+
+
 def main() -> None:
     """Run the command loop and keep the current user in memory"""
     try:
         setup_logging()
+        setup_parser_logging()
     except (OSError, TypeError, ValueError) as error:
         print(f"Не удалось настроить логирование: {error}")
 
@@ -206,6 +288,21 @@ def main() -> None:
                 )
 
                 _print_rate(report)
+
+            elif command.command == "update-rates":
+                print("Обновление курсов валют...")
+                report = update_rates(source=command.source)
+
+                _print_update(report)
+
+            elif command.command == "show-rates":
+                report = show_rates(
+                    currency=command.currency,
+                    top=command.top,
+                    base_currency=command.base,
+                )
+
+                _print_rates(report)
 
             elif command.command == "help":
                 parser.print_help()
