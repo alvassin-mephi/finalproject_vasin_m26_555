@@ -2,14 +2,13 @@
 
 from datetime import UTC, datetime
 
-from valutatrade_hub.core.currencies import CURRENCIES, get_currency
+from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import (
     ApiRequestError,
     InsufficientFundsError,
 )
 from valutatrade_hub.core.models import Portfolio, User, Wallet
 from valutatrade_hub.core.utils import (
-    EXCHANGE_RATES,
     validate_amount,
     validate_number,
 )
@@ -74,6 +73,15 @@ def show_portfolio(user: User | None, base_currency: str | None = None) -> dict:
 
     base = get_currency(base_currency).code
     portfolio = _load_portfolio(user.user_id, user=user)
+
+    if not portfolio.wallets:
+        return {
+            "username": user.username,
+            "base_currency": base,
+            "wallets": [],
+            "total_value": 0.0,
+        }
+
     currency_codes = {
         code for code, wallet in portfolio.wallets.items() if wallet.balance > 0
     }
@@ -172,24 +180,6 @@ def _trade(
     }
 
 
-def _get_stub_usd_rate(code: str) -> float:
-    """Validate a stub quote and distinguish provider errors from unknown codes"""
-    if code == "USD":
-        return 1.0
-
-    try:
-        rate = validate_number(EXCHANGE_RATES[code])
-
-        if rate <= 0:
-            raise ValueError("Курс должен быть положительным")
-    except (KeyError, TypeError, ValueError) as error:
-        raise ApiRequestError(
-            reason=f"Не удалось получить курс для {code}→USD"
-        ) from error
-
-    return rate
-
-
 def _get_cached_rates(
     cache: dict, currency_codes: set[str], base_currency: str, now: datetime
 ) -> dict | None:
@@ -198,11 +188,18 @@ def _get_cached_rates(
     timestamps = []
 
     try:
+        pairs = cache["pairs"]
+
         for code in currency_codes | {base_currency}:
             if code == "USD":
                 continue
 
-            entry = cache[f"{code}_USD"]
+            entry = pairs[f"{code}_USD"]
+            source = entry["source"]
+
+            if not isinstance(source, str) or not source.strip() or source == "Stub":
+                return None
+
             rate = validate_number(entry["rate"])
             updated_at = datetime.fromisoformat(entry["updated_at"])
 
@@ -236,25 +233,8 @@ def _get_cached_rates(
     }
 
 
-def _fetch_stub_rates(now: datetime) -> dict:
-    """Build a cache snapshot from the assignment's fixed USD prices"""
-    timestamp = now.isoformat(timespec="seconds")
-    cache = {
-        f"{code}_USD": {
-            "rate": _get_stub_usd_rate(code),
-            "updated_at": timestamp,
-        }
-        for code in CURRENCIES
-        if code != "USD"
-    }
-    cache["source"] = "Stub"
-    cache["last_refresh"] = timestamp
-
-    return cache
-
-
 def _load_rates(currency_codes: set[str], base_currency: str = "USD") -> dict:
-    """Load a fresh USD snapshot, refreshing all required quotes together once"""
+    """Read fresh cached quotes without network requests or automatic refresh"""
     now = datetime.now(UTC)
     required_codes = currency_codes | {base_currency}
 
@@ -270,19 +250,11 @@ def _load_rates(currency_codes: set[str], base_currency: str = "USD") -> dict:
 
     if snapshot is None:
         codes = ", ".join(sorted(required_codes - {"USD"}))
-        unavailable = f"Не удалось получить актуальные курсы для {codes}"
 
-        try:
-            cache = _fetch_stub_rates(now)
-        except (TypeError, ValueError, OSError) as error:
-            raise ApiRequestError(reason=unavailable) from error
-
-        snapshot = _get_cached_rates(cache, currency_codes, base_currency, now)
-
-        if snapshot is None:
-            raise ApiRequestError(reason=unavailable)
-
-        database.save_rates(cache)
+        raise ApiRequestError(
+            reason=f"Курсы для {codes} отсутствуют, устарели или некорректны. "
+            "Обновите курсы через Parser Service (см. README)."
+        )
 
     return snapshot
 

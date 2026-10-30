@@ -26,7 +26,7 @@
   - [get-rate - курс обмена валют](#get-rate---курс-обмена-валют)
   - [exit - выход из программы](#exit---выход-из-программы)
 - [Кэш курсов валют](#кэш-курсов-валют)
-- [API-клиенты Parser Service](#api-клиенты-parser-service)
+- [Обновление курсов валют](#обновление-курсов-валют)
 - [Настройки](#настройки)
 - [Структура](#структура)
 - [Проверка кода и сборка](#проверка-кода-и-сборка)
@@ -41,7 +41,7 @@ uv sync
 
 Курсы криптовалют загружаются из [CoinGecko](https://docs.coingecko.com/demo/reference/simple-price),
 фиатных валют - из [ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests).
-Для вызова ExchangeRate-API укажите ключ в переменной окружения:
+Перед запуском необходимо указать ключ ExchangeRate-API переменной окружения:
 
 ```sh
 export EXCHANGERATE_API_KEY="..."
@@ -130,9 +130,7 @@ sell --currency BTC --amount 0.01
 
 Показывает прямой и обратный курсы обмена валют и время получения в UTC.
 Обязательные аргументы: `--from` (исходная валюта) и `--to` (целевая валюта).
-Данные берутся из локального кэша. Если нужной котировки нет или она устарела,
-кэш автоматически обновляется через заглушку с фиксированными курсами из задания,
-без запроса к API.
+Данные берутся из локального кэша без запроса к API.
 
 ```text
 get-rate --from USD --to BTC
@@ -148,24 +146,30 @@ exit
 
 ## Кэш курсов валют
 
-`data/rates.json` хранит курсы валют к USD и время их получения.
-TTL задается параметром `RATES_TTL_SECONDS` в `pyproject.toml`
-и по умолчанию составляет 300 секунд.
+`data/rates.json` хранит последние курсы валют к USD, время получения
+и источник каждой котировки. История измерений сохраняется в `data/exchange_rates.json`.
+TTL задается параметром `RATES_TTL_SECONDS` в `pyproject.toml` - по умолчанию
+300 секунд. Он отсчитывается от получения ответа нашим приложением,
+а не от обновления данных у поставщика.
 
-`buy`, `sell`, `show-portfolio` и `get-rate` используют общий кэш.
-Если нужной котировки нет или она устарела, кэш автоматически обновляется
-через заглушку с фиксированными курсами из задания, без сетевых запросов.
-Курс обмена двух валют рассчитывается через USD.
+`buy`, `sell`, `show-portfolio` и `get-rate` используют общий кэш курсов валют
+без сетевых запросов. Если курс нужной валюты отсутствует или устарел,
+обновите его через Parser Service.
+Курс обмена двух валют рассчитывается через USD;
+обе котировки должны быть актуальны. При ошибке сделки балансы не меняются.
 
-## API-клиенты Parser Service
+## Обновление курсов валют
 
-Клиенты API можно вызвать отдельно; результат выводится без записи в кэш:
+Перед сделками запустите Parser Service из корня проекта:
 
 ```sh
-uv run python -c 'from valutatrade_hub.parser_service.api_clients import CoinGeckoClient; print(CoinGeckoClient().fetch_rates())'
+uv run python -c 'from valutatrade_hub.logging_config import setup_parser_logging; from valutatrade_hub.parser_service.updater import RatesUpdater; setup_parser_logging(); print(RatesUpdater().run_update())'
 ```
 
-Команды CLI пока обновляют кэш через заглушку.
+Опрашиваются оба API.
+При сбое одного API данные второго сохраняются; котировки отказавшего источника
+остаются в кэше со старым временем. Если все запросы завершились ошибкой,
+файлы с курсами валют остаются прежними.
 
 ## Настройки
 
@@ -177,14 +181,18 @@ uv run python -c 'from valutatrade_hub.parser_service.api_clients import CoinGec
 | `USERS_FILE` | `data/users.json` | Файл пользователей |
 | `PORTFOLIOS_FILE` | `data/portfolios.json` | Файл портфелей и кошельков |
 | `RATES_FILE` | `data/rates.json` | Кэш курсов валют |
+| `HISTORY_FILE` | `data/exchange_rates.json` | История курсов валют |
 | `INITIAL_USD_BALANCE` | `10_000.0` | Стартовый баланс в USD для новых пользователей |
 | `RATES_TTL_SECONDS` | `300` | Срок актуальности курсов валют, в секундах |
 | `DEFAULT_BASE_CURRENCY` | `USD` | Базовая валюта для `show-portfolio` без `--base` |
 | `LOG_FILE` | `logs/actions.log` | Журнал операций `buy` и `sell` |
+| `PARSER_LOG_FILE` | `logs/parser.log` | Журнал обновлений курсов валют |
 | `LOG_FORMAT` | `%(levelname)s %(asctime)s %(message)s` | Формат записей в файлах логов |
-| `LOG_LEVEL` | `INFO` | Минимальный уровень логирования |
+| `LOG_LEVEL` | `INFO` | Минимальный уровень журнала операций `buy` и `sell` |
 | `LOG_MAX_BYTES` | `1_048_576` | Размер файла для ротации, в байтах (по умолчанию 1 МиБ) |
 | `LOG_BACKUP_COUNT` | `3` | Количество архивных файлов для каждого журнала |
+
+Парсер пишет в файл сообщения уровня `DEBUG` и выше.
 
 Ключи API задаются через переменные окружения:
 

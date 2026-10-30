@@ -191,7 +191,3 @@ class DatabaseManager:
             )
 
         return cache
-
-    def save_rates(self, cache: dict) -> None:
-        """Save a refreshed stub exchange-rate cache"""
-        save(self._rates_file, cache)

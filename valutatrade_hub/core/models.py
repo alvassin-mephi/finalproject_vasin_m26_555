@@ -9,11 +9,7 @@ from datetime import UTC, datetime
 
 from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import InsufficientFundsError
-from valutatrade_hub.core.utils import (
-    EXCHANGE_RATES,
-    validate_amount,
-    validate_number,
-)
+from valutatrade_hub.core.utils import validate_amount, validate_number
 
 MIN_PASSWORD_LENGTH = 4
 SALT_BYTES = 16
@@ -271,17 +267,20 @@ class Portfolio:
         base_currency: str = "USD",
         rates: dict[str, float] | None = None,
     ) -> float:
-        """Value wallets using USD prices keyed by uppercase currency codes.
+        """Value wallets using supplied USD prices keyed by uppercase currency codes.
 
-        Use temporary rates only when rates is None. USD has an implicit rate
-        of 1. The caller loads rates from storage; this model performs no I/O.
+        USD has an implicit rate of 1. Empty portfolios are worth zero.
+        Missing quotes raise ValueError; this model performs no I/O.
         """
         base = get_currency(base_currency).code
 
-        exchange_rates = EXCHANGE_RATES if rates is None else rates
+        exchange_rates = {} if rates is None else rates
 
         if not isinstance(exchange_rates, dict):
             raise TypeError("Курсы валют должны быть переданы словарем")
+
+        if not self._wallets:
+            return 0.0
 
         def get_usd_rate(code: str) -> float:
             if code == "USD":

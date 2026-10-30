@@ -219,7 +219,6 @@ def main() -> None:
             print(f"Поддерживаемые валюты: {', '.join(CURRENCIES)}")
         except ApiRequestError as error:
             print(error)
-            print("Повторите попытку позже.")
         except (TypeError, ValueError) as error:
             print(error)
         except OSError as error:

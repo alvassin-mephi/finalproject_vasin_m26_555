@@ -1,15 +1,6 @@
-"""Validation and fixed example exchange rates"""
+"""Validation helpers"""
 
 import math
-
-# Example USD prices per currency unit from the assignment, not live rates
-EXCHANGE_RATES = {
-    "USD": 1.0,
-    "EUR": 1.0786,
-    "RUB": 0.01016,
-    "BTC": 59337.21,
-    "ETH": 3720.0,
-}
 
 
 def validate_currency_code(currency_code: str) -> str:

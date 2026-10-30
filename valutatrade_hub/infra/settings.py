@@ -13,6 +13,7 @@ DEFAULT_SETTINGS = {
     "RATES_TTL_SECONDS": 300,
     "DEFAULT_BASE_CURRENCY": "USD",
     "LOG_FILE": "logs/actions.log",
+    "PARSER_LOG_FILE": "logs/parser.log",
     "LOG_FORMAT": "%(levelname)s %(asctime)s %(message)s",
     "LOG_LEVEL": "INFO",
     "LOG_MAX_BYTES": 1_048_576,
