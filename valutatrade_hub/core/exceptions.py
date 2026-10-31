@@ -1,5 +1,7 @@
 """Domain errors for wallets, currencies, and exchange-rate providers"""
 
+from valutatrade_hub.core.utils import format_amount
+
 
 class InsufficientFundsError(ValueError):
     """Report the available and required balances for a withdrawal"""
@@ -9,9 +11,12 @@ class InsufficientFundsError(ValueError):
         self.required = required
         self.code = code
 
+        available_text = format_amount(available, code)
+        required_text = format_amount(required, code)
+
         super().__init__(
-            f"Недостаточно средств: доступно {available} {code}, "
-            f"требуется {required} {code}"
+            f"Недостаточно средств: доступно {available_text} {code}, "
+            f"требуется {required_text} {code}"
         )
 
 

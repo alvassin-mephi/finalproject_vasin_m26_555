@@ -5,7 +5,7 @@ import shlex
 
 from prettytable import PrettyTable
 
-from valutatrade_hub.core.currencies import CURRENCIES, CryptoCurrency, get_currency
+from valutatrade_hub.core.currencies import CURRENCIES
 from valutatrade_hub.core.exceptions import (
     ApiRequestError,
     CurrencyNotFoundError,
@@ -21,6 +21,7 @@ from valutatrade_hub.core.usecases import (
     show_portfolio,
     show_rates,
 )
+from valutatrade_hub.core.utils import format_amount
 from valutatrade_hub.infra.settings import SettingsLoader
 from valutatrade_hub.logging_config import setup_logging, setup_parser_logging
 from valutatrade_hub.parser_service.updater import API_CLIENTS, update_rates
@@ -80,13 +81,6 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _format_amount(amount: float, currency_code: str) -> str:
-    """Keep eight decimal places for crypto amounts and two for fiat amounts"""
-    precision = 8 if isinstance(get_currency(currency_code), CryptoCurrency) else 2
-
-    return f"{amount:,.{precision}f}"
-
-
 def _print_portfolio(report: dict) -> None:
     """Display a portfolio report without performing financial calculations"""
     if not report["wallets"]:
@@ -101,13 +95,11 @@ def _print_portfolio(report: dict) -> None:
     table.align[f"Стоимость ({base})"] = "r"
 
     for code, balance, value in report["wallets"]:
-        table.add_row(
-            [code, _format_amount(balance, code), _format_amount(value, base)]
-        )
+        table.add_row([code, format_amount(balance, code), format_amount(value, base)])
 
     print(f"Портфель пользователя '{report['username']}' (база: {base}):")
     print(table)
-    print(f"ИТОГО: {_format_amount(report['total_value'], base)} {base}")
+    print(f"ИТОГО: {format_amount(report['total_value'], base)} {base}")
 
 
 def _print_trade(report: dict) -> None:
@@ -117,19 +109,19 @@ def _print_trade(report: dict) -> None:
     value_label = "Выручка" if report["operation"] == "sell" else "Стоимость покупки"
 
     print(
-        f"{operation} выполнена: {_format_amount(report['amount'], code)} {code} "
+        f"{operation} выполнена: {format_amount(report['amount'], code)} {code} "
         f"по курсу {report['rate']:,.8f} USD/{code}"
     )
     print("Изменения в портфеле:")
     print(
-        f"- {code}: было {_format_amount(report['before'], code)} "
-        f"→ стало {_format_amount(report['after'], code)}"
+        f"- {code}: было {format_amount(report['before'], code)} "
+        f"→ стало {format_amount(report['after'], code)}"
     )
     print(
-        f"- USD: было {_format_amount(report['usd_before'], 'USD')} "
-        f"→ стало {_format_amount(report['usd_after'], 'USD')}"
+        f"- USD: было {format_amount(report['usd_before'], 'USD')} "
+        f"→ стало {format_amount(report['usd_after'], 'USD')}"
     )
-    print(f"{value_label}: {_format_amount(report['value_usd'], 'USD')} USD")
+    print(f"{value_label}: {format_amount(report['value_usd'], 'USD')} USD")
 
 
 def _print_rate(report: dict) -> None:

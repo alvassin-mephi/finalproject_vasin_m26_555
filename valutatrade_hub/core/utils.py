@@ -1,6 +1,14 @@
-"""Validation helpers"""
+"""Validation and amount formatting helpers"""
 
 import math
+
+AMOUNT_PRECISION = {
+    "USD": 2,
+    "EUR": 2,
+    "RUB": 2,
+    "BTC": 8,
+    "ETH": 8,
+}
 
 
 def validate_currency_code(currency_code: str) -> str:
@@ -40,3 +48,10 @@ def validate_amount(amount: float) -> float:
         raise ValueError("'amount' должен быть положительным числом")
 
     return amount
+
+
+def format_amount(amount: float, currency_code: str) -> str:
+    """Format a supported currency amount with its configured display precision"""
+    precision = AMOUNT_PRECISION[validate_currency_code(currency_code)]
+
+    return f"{amount:,.{precision}f}"
