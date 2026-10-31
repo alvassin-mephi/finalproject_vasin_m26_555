@@ -27,6 +27,7 @@ RATES_FILE = "data/rates.json"
 HISTORY_FILE = "data/exchange_rates.json"
 INITIAL_USD_BALANCE = 10_000.0
 RATES_TTL_SECONDS = 300
+UPDATE_INTERVAL_SECONDS = 300
 DEFAULT_BASE_CURRENCY = "USD"
 LOG_FILE = "logs/actions.log"
 PARSER_LOG_FILE = "logs/parser.log"
