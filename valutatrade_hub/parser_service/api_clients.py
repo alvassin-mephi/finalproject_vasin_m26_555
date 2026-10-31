@@ -11,19 +11,19 @@ from valutatrade_hub.parser_service.config import ParserConfig
 
 HTTP_ERRORS = {
     400: "некорректные параметры запроса",
-    401: "отсутствует или неверен API-ключ",
+    401: "отсутствует или неверен API-ключ; проверьте ключ",
     403: "доступ к API запрещен",
-    408: "сервер не успел обработать запрос",
+    408: "сервер не успел обработать запрос; повторите update-rates позже",
     429: "превышен лимит запросов; повторите попытку позже",
-    500: "внутренняя ошибка сервера",
-    503: "сервис временно недоступен",
+    500: "внутренняя ошибка сервера; повторите update-rates позже",
+    503: "сервис временно недоступен; повторите update-rates позже",
 }
 
 EXCHANGERATE_ERRORS = {
     "unsupported-code": "API не поддерживает базовую валюту",
     "unknown-code": "API не поддерживает базовую валюту",
     "malformed-request": "некорректные параметры запроса",
-    "invalid-key": "неверный API-ключ",
+    "invalid-key": "неверный API-ключ; проверьте EXCHANGERATE_API_KEY в окружении",
     "inactive-account": "учетная запись не активирована; подтвердите email",
     "quota-reached": "исчерпана квота запросов; повторите попытку позже",
 }
@@ -72,12 +72,14 @@ class BaseApiClient(ABC):
                     ) from None
         except requests.exceptions.Timeout:
             raise ApiRequestError(
-                reason=f"{self.SOURCE}: превышено время ожидания ответа"
+                reason=f"{self.SOURCE}: превышено время ожидания ответа. "
+                "Повторите update-rates позже."
             ) from None
         except requests.exceptions.RequestException:
             # Request exceptions may include the URL with the API key
             raise ApiRequestError(
-                reason=f"{self.SOURCE}: не удалось выполнить HTTP-запрос"
+                reason=f"{self.SOURCE}: не удалось выполнить HTTP-запрос. "
+                "Проверьте подключение к интернету и повторите update-rates."
             ) from None
 
         if not isinstance(data, dict):
