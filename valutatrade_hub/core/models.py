@@ -27,11 +27,7 @@ class User:
         salt: str,
         registration_date: datetime,
     ) -> None:
-        if (
-            isinstance(user_id, bool)
-            or not isinstance(user_id, int)
-            or user_id <= 0
-        ):
+        if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
             raise ValueError("ID пользователя должен быть положительным целым числом")
 
         if (
