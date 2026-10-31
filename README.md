@@ -32,14 +32,17 @@
 - [Настройки](#настройки)
 - [Структура](#структура)
 - [Проверка кода и сборка](#проверка-кода-и-сборка)
+- [Демонстрация](#демонстрация)
 
 ## Установка и запуск
 
-Требуются Python 3.12 или новее и uv. Выполняйте команды из корня проекта:
+Требуются Python 3.12 или новее, uv и make. Выполняйте команды из корня проекта:
 
 ```sh
-uv sync
+make install
 ```
+
+Список команд Makefile: `make help`.
 
 Курсы криптовалют загружаются из [CoinGecko](https://docs.coingecko.com/demo/reference/simple-price),
 фиатных валют - из [ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests).
@@ -47,16 +50,21 @@ uv sync
 
 ```sh
 export EXCHANGERATE_API_KEY="..."
-uv run valutatrade
+make run
 ```
 
 Опционально можно указать Demo-ключ для CoinGecko в `COINGECKO_API_KEY`,
 без него используется публичный доступ с ограничениями сервиса.
 
-Другие способы запуска: `uv run python main.py` и
-`uv run python -m valutatrade_hub`.
+Другие способы запуска: `uv run valutatrade`, `uv run python main.py`
+и `uv run python -m valutatrade_hub`.
 Для обновления курсов валют по расписанию предусмотрен
 [отдельный планировщик](#периодическое-обновление).
+
+Перед очисткой остановите CLI и планировщик. `make clean-data` удаляет
+JSON-файлы из `data/`, сохраняя `data/.gitkeep`; `make clean-logs` удаляет
+логи и архивы ротации из `logs/`. Используются стандартные пути, независимо
+от настроек.
 
 ## Команды CLI
 
@@ -203,7 +211,7 @@ TTL задается параметром `RATES_TTL_SECONDS` в `pyproject.toml
 с теми же переменными окружения для ключей:
 
 ```sh
-uv run python -m valutatrade_hub.parser_service.scheduler
+make scheduler
 ```
 
 Первое обновление выполняется сразу, затем после каждого обновления процесс
@@ -211,7 +219,7 @@ uv run python -m valutatrade_hub.parser_service.scheduler
 в `[tool.valutatrade]`; время запросов добавляется к интервалу.
 Для остановки нажмите `Ctrl+C`. Обычный запуск CLI планировщик не включает.
 
-Для работы с кошельком запустите `uv run valutatrade` во втором терминале.
+Для работы с кошельком запустите `make run` во втором терминале.
 Используйте только один процесс обновления: не запускайте другой планировщик
 или `update-rates` одновременно с ним, поскольку JSON-хранилище не блокирует
 параллельную запись.
@@ -277,9 +285,12 @@ uv.lock
 ## Проверка кода и сборка
 
 ```sh
-uv run ruff check .
-uv run ruff format --check .
-uv build
+make lint
+make build
 ```
 
-Для форматирования: `uv run ruff format .`.
+Для форматирования: `make format`.
+
+## Демонстрация
+
+[Посмотреть запись работы приложения на asciinema](https://asciinema.org/a/mnE4Tj43lVbBMhCS).
