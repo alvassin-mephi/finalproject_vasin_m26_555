@@ -210,7 +210,7 @@ def main() -> None:
     """Run the command loop and keep the current user in memory"""
     try:
         setup_logging()
-        setup_parser_logging()
+        setup_parser_logging(console=True)
     except (OSError, TypeError, ValueError) as error:
         print(f"Не удалось настроить логирование: {error}")
 

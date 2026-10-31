@@ -1,4 +1,4 @@
-"""Configure rotating trade and parser logs"""
+"""Configure rotating trade and parser logs with optional parser console output"""
 
 import logging
 import time
@@ -9,6 +9,8 @@ from valutatrade_hub.infra.settings import SettingsLoader
 
 ACTION_LOGGER_NAME = "valutatrade_hub.actions"
 PARSER_LOGGER_NAME = "valutatrade_hub.parser"
+PARSER_CONSOLE_HANDLER_NAME = "parser_console"
+PARSER_CONSOLE_FORMAT = "%(levelname)s: %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -17,11 +19,23 @@ def setup_logging() -> logging.Logger:
     return _setup_file_logger(ACTION_LOGGER_NAME, "LOG_FILE")
 
 
-def setup_parser_logging() -> logging.Logger:
-    """Configure a separate rotating file for parser updates and source errors"""
-    return _setup_file_logger(
+def setup_parser_logging(*, console: bool = False) -> logging.Logger:
+    """Keep the parser file logger and optionally add console output once"""
+    logger = _setup_file_logger(
         PARSER_LOGGER_NAME, "PARSER_LOG_FILE", level=logging.DEBUG
     )
+
+    if console and not any(
+        handler.name == PARSER_CONSOLE_HANDLER_NAME for handler in logger.handlers
+    ):
+        handler = logging.StreamHandler()
+        handler.set_name(PARSER_CONSOLE_HANDLER_NAME)
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter(PARSER_CONSOLE_FORMAT))
+
+        logger.addHandler(handler)
+
+    return logger
 
 
 def _setup_file_logger(
