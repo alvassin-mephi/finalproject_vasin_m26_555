@@ -36,13 +36,11 @@
 
 ## Установка и запуск
 
-Требуются Python 3.12 или новее, uv и make. Выполняйте команды из корня проекта:
+Требуются Python 3.12 или новее и uv. Выполняйте команды из корня проекта:
 
 ```sh
-make install
+uv sync
 ```
-
-Список команд Makefile: `make help`.
 
 Курсы криптовалют загружаются из [CoinGecko](https://docs.coingecko.com/demo/reference/simple-price),
 фиатных валют - из [ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests).
@@ -50,14 +48,18 @@ make install
 
 ```sh
 export EXCHANGERATE_API_KEY="..."
-make run
+uv run valutatrade
 ```
 
 Опционально можно указать Demo-ключ для CoinGecko в `COINGECKO_API_KEY`,
 без него используется публичный доступ с ограничениями сервиса.
 
-Другие способы запуска: `uv run valutatrade`, `uv run python main.py`
+Другие способы запуска: `uv run python main.py`
 и `uv run python -m valutatrade_hub`.
+
+При установленном make можно использовать `make install` и `make run`
+для установки и запуска. Список команд Makefile: `make help`.
+
 Для обновления курсов валют по расписанию предусмотрен
 [отдельный планировщик](#периодическое-обновление).
 
@@ -211,15 +213,17 @@ TTL задается параметром `RATES_TTL_SECONDS` в `pyproject.toml
 с теми же переменными окружения для ключей:
 
 ```sh
-make scheduler
+uv run python -m valutatrade_hub.parser_service.scheduler
 ```
+
+Альтернатива через make: `make scheduler`.
 
 Первое обновление выполняется сразу, затем после каждого обновления процесс
 ждет `UPDATE_INTERVAL_SECONDS` секунд (по умолчанию 300). Параметр находится
 в `[tool.valutatrade]`; время запросов добавляется к интервалу.
 Для остановки нажмите `Ctrl+C`. Обычный запуск CLI планировщик не включает.
 
-Для работы с кошельком запустите `make run` во втором терминале.
+Для работы с кошельком запустите `uv run valutatrade` во втором терминале.
 Используйте только один процесс обновления: не запускайте другой планировщик
 или `update-rates` одновременно с ним, поскольку JSON-хранилище не блокирует
 параллельную запись.
@@ -285,11 +289,14 @@ uv.lock
 ## Проверка кода и сборка
 
 ```sh
-make lint
-make build
+uv run ruff check .
+uv run ruff format --check .
+uv build
 ```
 
-Для форматирования: `make format`.
+Альтернативы через make: `make lint` и `make build`.
+
+Для форматирования: `uv run ruff format .` или `make format`.
 
 ## Демонстрация
 
